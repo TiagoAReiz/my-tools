@@ -132,10 +132,12 @@ _project_exit() {
     local date_suffix
     date_suffix=$(date +"%d-%m-%Y")
     local branch="remaining work from $date_suffix"
-
     _check_deps
 
     echo -e "${BOLD}${BLUE}Saving all projects to GitHub...${NC}"
+
+    # Repos whose work did NOT make it to GitHub. These are NEVER deleted.
+    local failed_repos=()
 
     shopt -s nullglob
     local dirs=("$WORKFOLDER"/*/)
@@ -150,6 +152,25 @@ _project_exit() {
         echo -e "${BOLD}--- $repo_name ---${NC}"
 
         cd "$dir" || continue
+
+        # Detect nested git repos
+        local nested_gits
+        nested_gits=$(find . -mindepth 2 -name ".git" -type d 2>/dev/null)
+        if [[ -n "$nested_gits" ]]; then
+            echo -e "  ${RED}AVISO: repos git aninhados detectados em '$repo_name':${NC}"
+            while IFS= read -r nested; do
+                local nested_dir="${nested%/.git}"
+                echo -e "    ${YELLOW}→ $nested_dir${NC}"
+            done <<< "$nested_gits"
+            echo ""
+            read -rp "  Remover os .git internos e salvar tudo? (y/N): " confirm
+            if [[ "${confirm,,}" == "y" ]]; then
+                while IFS= read -r nested; do
+                    rm -rf "$nested"
+                    echo -e "  ${GREEN}Removido: $nested${NC}"
+                done <<< "$nested_gits"
+            fi
+        fi
 
         git add -A 2>/dev/null || true
 
@@ -172,15 +193,48 @@ _project_exit() {
                 echo -e "  ${GREEN}Saved to branch '${branch}'.${NC}"
             else
                 echo -e "  ${RED}Could not push '$repo_name' to GitHub.${NC}"
+                echo -e "  ${YELLOW}Keeping local folder safe — work was NOT deleted.${NC}"
+                failed_repos+=("$repo_name")
             fi
         fi
     done
 
     echo ""
     echo -e "${BLUE}Cleaning workfolder...${NC}"
-    find "$WORKFOLDER" -mindepth 1 -maxdepth 1 ! -name "CLAUDE.md" -exec rm -rf {} +
 
-    echo -e "${GREEN}${BOLD}Done! Workfolder is clean.${NC}"
+    # Only delete folders that were safely pushed. Anything that failed to
+    # reach GitHub stays on disk so no work is ever lost.
+    for dir in "$WORKFOLDER"/*/ "$WORKFOLDER"/*; do
+        [[ -e "$dir" ]] || continue
+        local entry
+        entry=$(basename "$dir")
+        [[ "$entry" == "CLAUDE.md" ]] && continue
+
+        local skip=""
+        for failed in "${failed_repos[@]}"; do
+            if [[ "$entry" == "$failed" ]]; then
+                skip="yes"
+                break
+            fi
+        done
+
+        if [[ -n "$skip" ]]; then
+            echo -e "  ${YELLOW}Kept '$entry' (not on GitHub yet).${NC}"
+        else
+            rm -rf "$dir"
+        fi
+    done
+
+    if (( ${#failed_repos[@]} > 0 )); then
+        echo ""
+        echo -e "${YELLOW}${BOLD}Atenção:${NC} ${YELLOW}${#failed_repos[@]} repo(s) não foram salvos no GitHub e foram mantidos localmente:${NC}"
+        for failed in "${failed_repos[@]}"; do
+            echo -e "  ${RED}→ $failed${NC}"
+        done
+        echo -e "${YELLOW}Resolva o push manualmente antes de rodar 'project exit' de novo.${NC}"
+    else
+        echo -e "${GREEN}${BOLD}Done! Workfolder is clean.${NC}"
+    fi
 }
 
 case "${1:-}" in
