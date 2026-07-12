@@ -27,3 +27,11 @@ chmod +x ~/.local/bin/project
 sudo apt install gh fzf -y
 gh auth login
 ```
+
+## skills/
+
+Claude Code skills (`SKILL.md` files), reusable across projects.
+
+### challenge-assertions
+
+General behavioral skill: push back on claims/proposals with reasoning instead of defaulting to agreement.
